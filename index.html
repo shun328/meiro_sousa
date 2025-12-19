@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>A-Frame Maze</title>
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="goal.js"></script>
+  <script src="target-spawner.js"></script>
+  
+  <script src="score-manager.js"></script>
+  <script src="score-display.js"></script>
+  <script src="shoot_countDown.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.2.0/dist/aframe-extras.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aframe-msdf-text-component/dist/aframe-msdf-text-component.min.js"></script>
+
+  <style>
+    body { margin: 0; overflow: hidden; }
+  </style>
+
+</head>
+<body>
+
+<a-scene>
+  <a-assets>
+    <a-asset-item id="cork" src="cork.glb"></a-asset-item><!--コルク-->
+    <a-asset-item id="kabe2" src="wall.glb"></a-asset-item><!--壁-->
+    <a-asset-item id="yuka" src="tile.glb"></a-asset-item><!--床-->
+    <a-asset-item id="goal" src="start.glb"></a-asset-item><!--ゴール-->
+    <a-asset-item id="timer" src="../timer.glb"></a-asset-item>
+    <a-asset-item id="mato" src="mato.glb"></a-asset-item>
+    <a-asset-item id="map" src="ku-kan.glb"></a-asset-item>
+  </a-assets>
+  <a-sky color="black"></a-sky><!--空の色-->
+  <!-- シンプルなプレイヤー設定 -->
+  <a-entity id="rig"
+    movement-control
+    arrival-check="destination: 31 1.6 35; onarrival: 100 50 100"
+    position="3 1.6 10">
+    <!-- カメラの設定（感度など） -->
+    <a-entity id="camera"
+      camera
+      mouse-look="sensitivity: 0.3"
+      cork-shooter
+      position="0 0 0"
+      score-display="hudSelector: #scoreHud">
+      <!-- タイマー -->
+      <a-plane position="0 -0.5 -1.21" width="1.2" height="0.4" color="#000" opacity="0.5" material="shader: flat"></a-plane>
+      <a-entity id="timerText" text="value: 60; color: red; align: center" width: 3 scale="2 2 2" position="0 -0.5 -1.2"></a-entity>
+      <!-- クロスヘア -->
+      <a-entity id="crosshair"
+                geometry="primitive: ring; radiusInner: 0.002; radiusOuter: 0.004"
+                material="color: red; shader: flat"
+                position="0 0 -1">
+      </a-entity>
+      <!--残弾数-->
+      <a-entity id="ammoHud"
+            text="value: ammo: 10; color: red; align: left; shader: msdf"
+            position="-0.4 -0.6 -1"
+            scale="1 1 1">
+      </a-entity>
+      <!-- スコア表示 -->
+      <a-entity id="scoreHud"
+          text="value: score: 0; color: yellow; align: right; shader: msdf"
+          position="0.4 -0.6 -1"
+          scale="1 1 1">
+      </a-entity>
+      <a-entity id="countdown" 
+        shoot-countdown="time: 3">
+      </a-entity>
+
+
+
+    </a-entity>
+    <a-entity oculus-touch-controls="hand: right; model: true;" laser-controls="hand: right"></a-entity>
+    <a-entity oculus-touch-controls="hand: left; model: true;" laser-controls="hand: left"></a-entity>
+  </a-entity>
+
+  <a-entity gltfmodel="#map"
+    position = "100 50 100"
+    scale = "10 10 10"
+  ></a-entity>
+
+
+  <a-entity id="maze"></a-entity>
+  <a-entity gltf-model="#goal" position="31 0.6 35" scale="0.5 1.3 0.5" rotation="0 90 0"></a-entity>
+
+  <!-- スコアマネージャー（シーン直下に配置） -->
+  <a-entity id="scoreManager" score-manager></a-entity>
+
+  <!-- スポナー（テレポート先の付近で自動起動） -->
+  <a-entity id="targetSpawner"
+    target-spawner="center: 100 50 100;
+    totalTargets: 12;
+    duration: 20;
+    radiusMin: 15;
+    radiusMax: 35;
+    heightMin: 50;
+    heightMax: 60;">
+  </a-entity>
+
+</a-scene>
+
+<div style="position: fixed; bottom: 20px; left: 20px; color: white; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 5px; font-family: sans-serif; font-size: 14px; z-index: 1000;">
+  💡 画面をクリックして視点操作を開始<br>
+  マウスで視点移動 / WASDキーで移動 / ESCキーで終了
+</div>
+ 
+<script type="module">
+// ポインターロック対応のマウス視点移動コンポーネント
+AFRAME.registerComponent('mouse-look', {
+  schema: {
+    sensitivity: {type: 'number', default: 0.8},
+    enabled: {type: 'boolean', default: true}
+  },
+ 
+  init: function () {
+    this.yaw = 0;
+    this.pitch = 0;
+ 
+    this.onMouseMove = this.onMouseMove.bind(this);
+    this.onClick = this.onClick.bind(this);
+    this.onPointerLockChange = this.onPointerLockChange.bind(this);
+ 
+    // クリックでポインターロックを要求
+    document.addEventListener('click', this.onClick);
+    document.addEventListener('pointerlockchange', this.onPointerLockChange);
+    document.addEventListener('mozpointerlockchange', this.onPointerLockChange);
+    document.addEventListener('webkitpointerlockchange', this.onPointerLockChange);
+  },
+ 
+  onClick: function () {
+    // ポインターロックを要求
+    const canvas = document.querySelector('canvas');
+    if (canvas && canvas.requestPointerLock) {
+      canvas.requestPointerLock = canvas.requestPointerLock ||
+                                  canvas.mozRequestPointerLock ||
+                                  canvas.webkitRequestPointerLock;
+      canvas.requestPointerLock();
+    }
+  },
+ 
+  onPointerLockChange: function () {
+    const locked = document.pointerLockElement ||
+                   document.mozPointerLockElement ||
+                   document.webkitPointerLockElement;
+ 
+    if (locked) {
+      document.addEventListener('mousemove', this.onMouseMove);
+    } else {
+      document.removeEventListener('mousemove', this.onMouseMove);
+    }
+  },
+ 
+  onMouseMove: function (e) {
+    if (!this.data.enabled) return;
+ 
+    const movementX = e.movementX || e.mozMovementX || e.webkitMovementX || 0;
+    const movementY = e.movementY || e.mozMovementY || e.webkitMovementY || 0;
+ 
+    this.yaw -= movementX * this.data.sensitivity;
+    this.pitch -= movementY * this.data.sensitivity;
+ 
+    // 上下視点の制限（-90度から90度）
+    this.pitch = Math.max(-90, Math.min(90, this.pitch));
+ 
+    this.el.setAttribute('rotation', {
+      x: this.pitch,
+      y: this.yaw,
+      z: 0
+    });
+  },
+ 
+  remove: function () {
+    document.removeEventListener('click', this.onClick);
+    document.removeEventListener('mousemove', this.onMouseMove);
+    document.removeEventListener('pointerlockchange', this.onPointerLockChange);
+    document.removeEventListener('mozpointerlockchange', this.onPointerLockChange);
+    document.removeEventListener('webkitpointerlockchange', this.onPointerLockChange);
+  }
+});
+
+  import './CorkFromTheEye.js';
+
+  AFRAME.registerComponent('movement-control', {
+  init: function () {
+    this.velocity = new THREE.Vector3();
+    this.direction = new THREE.Vector3();
+    this.speed = 0.1;
+    
+    this.keys = {};
+    window.addEventListener('keydown', (e) => {
+      this.keys[e.code] = true;
+    });
+    window.addEventListener('keyup', (e) => {
+      this.keys[e.code] = false;
+    });
+  },
+  
+  tick: function () {
+  const el = this.el;
+  let pos = el.getAttribute('position');
+
+  const camera = el.querySelector('[camera]');
+  const cameraRotation = camera.getAttribute('rotation');
+  const angleY = THREE.MathUtils.degToRad(cameraRotation.y);
+
+  this.direction.set(0, 0, 0);
+
+  if (this.keys['KeyW'] || this.keys['ArrowUp']) {
+    this.direction.x -= Math.sin(angleY);
+    this.direction.z -= Math.cos(angleY);
+  }
+  if (this.keys['KeyS'] || this.keys['ArrowDown']) {
+    this.direction.x += Math.sin(angleY);
+    this.direction.z += Math.cos(angleY);
+  }
+  if (this.keys['KeyA'] || this.keys['ArrowLeft']) {
+    this.direction.x -= Math.cos(angleY);
+    this.direction.z += Math.sin(angleY);
+  }
+  if (this.keys['KeyD'] || this.keys['ArrowRight']) {
+    this.direction.x += Math.cos(angleY);
+    this.direction.z -= Math.sin(angleY);
+  }
+
+  if (this.direction.length() > 0) {
+    this.direction.normalize();
+  }
+
+  this.velocity.copy(this.direction).multiplyScalar(this.speed);
+
+  const nextX = {
+    x: pos.x + this.velocity.x,
+    y: pos.y,
+    z: pos.z
+  };
+
+  if (!this.checkWallCollision(nextX)) {
+    pos.x = nextX.x;
+  }
+
+  const nextZ = {
+    x: pos.x,
+    y: pos.y,
+    z: pos.z + this.velocity.z
+  };
+
+  if (!this.checkWallCollision(nextZ)) {
+    pos.z = nextZ.z;
+  }
+
+  el.setAttribute('position', pos);
+},
+  
+  checkWallCollision: function (position) {
+
+    // プレイヤー当たり判定（箱）
+    const playerBox = new THREE.Box3(
+      new THREE.Vector3(position.x - 0.3, position.y - 1, position.z - 0.3),
+      new THREE.Vector3(position.x + 0.3, position.y + 1, position.z + 0.3)
+    );
+
+    const walls = document.querySelectorAll('.wall-collision');
+
+      for (let wall of walls) {
+        const mesh = wall.getObject3D('mesh');
+        if (!mesh) continue;
+
+        const wallBox = new THREE.Box3().setFromObject(mesh);
+
+        if (playerBox.intersectsBox(wallBox)) {
+          console.log("HIT", wall);
+          return true;
+        }
+      }
+      return false;
+  }
+
+});
+
+import { createKabe } from "./createKabe.js";
+import { createFloors } from "./floor.js";
+import { putTimer } from "./putTimer.js";
+import { startTimer } from './timer.js';
+
+const mazeArray = [
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+  [1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1],
+  [1,0,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,0,1],
+  [1,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1],
+  [1,0,1,0,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1],
+  [1,0,1,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,1],
+  [1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,0,1],
+  [1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,1,0,1],
+  [1,1,1,1,1,1,1,1,1,0,1,0,1,0,1,1,1,1,1],
+  [1,0,0,0,0,0,0,0,1,0,1,0,1,0,1,0,0,0,1],
+  [1,0,1,1,1,1,1,1,1,0,1,0,1,0,1,0,1,1,1],
+  [1,0,1,0,0,0,0,0,0,0,1,0,1,0,1,0,0,0,1],
+  [1,0,1,0,1,1,1,1,1,0,1,1,1,0,1,1,1,0,1],
+  [1,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,1],
+  [1,0,1,1,1,1,1,0,1,1,1,1,1,0,1,1,1,1,1],
+  [1,0,1,0,0,0,1,0,1,0,0,0,0,0,0,0,1,0,1],
+  [1,0,1,1,1,0,1,0,1,1,1,0,1,0,1,0,1,0,1],
+  [1,0,0,0,0,0,1,0,0,0,0,0,1,0,1,0,0,0,1],
+  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+];
+
+document.querySelector("a-scene").addEventListener("loaded", () => {
+    const scene = document.querySelector("#maze");
+
+    createKabe(scene, mazeArray);
+    createFloors(scene, 19);
+
+    startTimer();//カウントダウンスタート
+
+    console.log("Maze generated after assets loaded");
+});
+
+const itemPositions = [
+      [3,1],[6,1]
+    ];
+    //pos[0]がx座標、pos[1]がy座標
+    itemPositions.forEach(pos => putTimer(pos[0], pos[1], '#timer'));
+
+</script>
+</body>
+</html>
